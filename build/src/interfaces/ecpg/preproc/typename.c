@@ -1,0 +1,1 @@
+/home/runner/work/postgres/postgres/build/../src/interfaces/ecpg/ecpglib/typename.c

@@ -1,0 +1,1 @@
+/home/runner/work/postgres/postgres/src/interfaces/ecpg/compatlib/Makefile

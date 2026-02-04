@@ -1,0 +1,1 @@
+/home/runner/work/postgres/postgres/src/test/modules/test_dsm_registry/Makefile

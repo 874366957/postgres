@@ -1,0 +1,1 @@
+/home/runner/work/postgres/postgres/src/interfaces/ecpg/test/compat_oracle/Makefile
