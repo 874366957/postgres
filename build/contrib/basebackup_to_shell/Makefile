@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/contrib/basebackup_to_shell/Makefile

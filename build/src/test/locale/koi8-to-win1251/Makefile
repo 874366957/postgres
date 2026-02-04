@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/src/test/locale/koi8-to-win1251/Makefile

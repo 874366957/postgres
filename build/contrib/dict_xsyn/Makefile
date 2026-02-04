@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/contrib/dict_xsyn/Makefile

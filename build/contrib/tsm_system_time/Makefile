@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/contrib/tsm_system_time/Makefile

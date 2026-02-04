@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/contrib/basic_archive/Makefile

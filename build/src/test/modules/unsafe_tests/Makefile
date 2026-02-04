@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/src/test/modules/unsafe_tests/Makefile

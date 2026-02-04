@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/contrib/xml2/Makefile

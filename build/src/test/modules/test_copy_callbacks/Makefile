@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/src/test/modules/test_copy_callbacks/Makefile

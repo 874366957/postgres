@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/src/backend/access/tablesample/Makefile

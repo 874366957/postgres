@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/doc/src/sgml/images/Makefile

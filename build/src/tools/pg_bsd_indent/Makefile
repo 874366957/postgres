@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/src/tools/pg_bsd_indent/Makefile

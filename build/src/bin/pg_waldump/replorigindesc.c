@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/build/../src/backend/access/rmgrdesc/replorigindesc.c

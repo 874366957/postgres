@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/build/../src/timezone/localtime.c

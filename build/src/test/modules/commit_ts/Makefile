@@ -1,1 +1,0 @@
-/home/runner/work/postgres/postgres/src/test/modules/commit_ts/Makefile
