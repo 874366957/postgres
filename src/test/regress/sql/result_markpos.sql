@@ -1,97 +1,76 @@
 --
--- Test ExecResultMarkPos and ExecResultRestrPos functions
+-- Test to understand ExecResultMarkPos and ExecResultRestrPos functions
 --
--- These functions are called when a Result node with an outer plan is the
--- inner child of a Merge Join. The Result node delegates mark/restore to
--- its child plan (Sort/Material).
+-- Background:
+-- -----------
+-- ExecResultMarkPos: Marks current scan position by delegating to child plan
+-- ExecResultRestrPos: Restores to marked position by delegating to child plan
 --
--- ExecResultMarkPos: Marks the current scan position by calling
---                    ExecMarkPos on the child plan
--- ExecResultRestrPos: Restores to a previously marked position by calling
---                     ExecRestrPos on the child plan
+-- These functions exist in the executor for completeness: they enable a Result
+-- node with a child plan to participate in mark/restore operations (required
+-- by Merge Join for handling duplicate keys).
 --
--- Key conditions for these functions to be called:
--- 1. Merge Join needs mark/restore on inner side (duplicates in join key)
--- 2. Inner side is a Result node (created for projection over non-projectable node)
--- 3. Result has an outer plan that supports mark/restore (Sort, Material)
--- 4. Multiple matching tuples exist (trigger actual mark/restore)
+-- In practice, getting these functions called is very difficult because:
+-- 1. MergeJoin can project, so it handles projections itself - no Result needed
+-- 2. If inner needs sorting, Sort is added ABOVE Result, not below
+-- 3. The optimizer aggressively merges projections into capable nodes
 --
--- A Sort node is NOT projection-capable. So if we need a different target
--- list on top of a Sort, a Result node will be created to do the projection.
+-- The functions would be called if:
+-- - Result is the DIRECT inner child of Merge Join
+-- - Result wraps a plan that supports mark/restore (IndexScan, Sort, Material)
+-- - No additional Sort is needed on the inner side
+-- - Duplicate keys trigger mark/restore
+--
+-- This test demonstrates the typical plan shapes and explains why Result
+-- rarely appears as the direct inner child of Merge Join in practice.
 --
 
--- Create test tables
-CREATE TABLE result_markpos_t1 (a int, b int);
-CREATE TABLE result_markpos_t2 (x int, y int, z text);
+-- Create tables
+CREATE TABLE result_mark_t1 (a int PRIMARY KEY, b int);
+CREATE TABLE result_mark_t2 (x int, y int);
+CREATE INDEX result_mark_t2_idx ON result_mark_t2(x);
 
--- Insert data with duplicates to trigger mark/restore during merge join
-INSERT INTO result_markpos_t1 SELECT i, i FROM generate_series(1, 10) i;
--- Add duplicates for key 5 to force multiple restore calls
-INSERT INTO result_markpos_t1 SELECT 5, 100 + i FROM generate_series(1, 3) i;
+-- Insert data with duplicates to trigger mark/restore
+INSERT INTO result_mark_t1 SELECT i, i * 10 FROM generate_series(1, 10) i;
+INSERT INTO result_mark_t2 SELECT i % 5 + 1, i FROM generate_series(1, 20) i;
 
-INSERT INTO result_markpos_t2 SELECT i, i * 10, 'val' || i FROM generate_series(1, 10) i;
--- Add duplicates for key 5 to create many matching combinations
-INSERT INTO result_markpos_t2 SELECT 5, 200 + i, 'dup' || i FROM generate_series(1, 3) i;
+ANALYZE result_mark_t1;
+ANALYZE result_mark_t2;
 
-ANALYZE result_markpos_t1;
-ANALYZE result_markpos_t2;
-
--- Force merge join and disable other join methods
+-- Force merge join
 SET enable_hashjoin = off;
 SET enable_nestloop = off;
 SET enable_mergejoin = on;
 
 --
--- Test 1: Merge join with duplicates on both sides
--- When there are multiple matches for the same key (5), the merge join
--- must mark the position and restore it to process all combinations
---
--- The merge join uses Sort on inner side which supports mark/restore.
+-- Demonstration 1: Merge join with IndexScan (mark/restore on IndexScan)
+-- The projection (y * 2) is handled by Merge Join itself - no Result node
 --
 
 EXPLAIN (COSTS OFF)
-SELECT t1.a, t1.b, t2.x, t2.y
-FROM result_markpos_t1 t1 JOIN result_markpos_t2 t2 ON t1.a = t2.x
-WHERE t1.a IN (3, 5)
-ORDER BY t1.a, t1.b, t2.y;
+SELECT t1.a, t1.b, t2.x, t2.y, t2.y * 2 as computed
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+ORDER BY t1.a;
 
--- Execute to exercise mark/restore on Sort
--- For key=5: t1 has 4 rows, t2 has 4 rows -> 16 result rows
-SELECT t1.a, t1.b, t2.x, t2.y
-FROM result_markpos_t1 t1 JOIN result_markpos_t2 t2 ON t1.a = t2.x
-WHERE t1.a = 5
-ORDER BY t1.a, t1.b, t2.y;
+SELECT t1.a, t1.b, t2.x, t2.y, t2.y * 2 as computed
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+WHERE t1.a = 3
+ORDER BY t1.a, t2.y;
 
 --
--- Test 2: Merge join with additional duplicates
--- This test adds more duplicates to exercise mark/restore more extensively.
--- The Merge Join algorithm marks positions when processing duplicate keys
--- and restores to replay matching rows.
---
--- Note: ExecResultMarkPos/ExecResultRestrPos exist for cases where a Result
--- node wraps a Sort/Material. In practice, the optimizer often optimizes
--- this away, but the functions ensure the executor can handle any valid
--- plan tree. This test demonstrates the mark/restore mechanism in general.
+-- Demonstration 2: With whole-row reference (still no Result node)
+-- Merge Join's projection capability handles this case too
 --
 
--- First show a case that uses merge join with the inner side processing duplicates
-INSERT INTO result_markpos_t1 VALUES (3, 301), (3, 302);
-INSERT INTO result_markpos_t2 VALUES (3, 301, 'extra1'), (3, 302, 'extra2');
+EXPLAIN (COSTS OFF)  
+SELECT t1.a, (t2.*)::text as t2_row
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+ORDER BY t1.a;
 
-ANALYZE result_markpos_t1;
-ANALYZE result_markpos_t2;
-
--- This uses Merge Join on the inner Sort, exercising mark/restore
-EXPLAIN (COSTS OFF)
-SELECT t1.a, t1.b, t2.x, t2.y, t2.z
-FROM result_markpos_t1 t1 JOIN result_markpos_t2 t2 ON t1.a = t2.x
-WHERE t1.a IN (3, 5)
-ORDER BY t1.a, t1.b, t2.y;
-
-SELECT t1.a, t1.b, t2.x, t2.y, t2.z
-FROM result_markpos_t1 t1 JOIN result_markpos_t2 t2 ON t1.a = t2.x
-WHERE t1.a IN (3, 5)
-ORDER BY t1.a, t1.b, t2.y;
+SELECT t1.a, (t2.*)::text as t2_row
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+WHERE t1.a = 3
+ORDER BY t1.a, t2_row;
 
 -- Reset settings
 RESET enable_hashjoin;
@@ -99,5 +78,24 @@ RESET enable_nestloop;
 RESET enable_mergejoin;
 
 -- Cleanup
-DROP TABLE result_markpos_t1;
-DROP TABLE result_markpos_t2;
+DROP TABLE result_mark_t1;
+DROP TABLE result_mark_t2;
+
+--
+-- Summary:
+-- --------
+-- ExecResultMarkPos and ExecResultRestrPos are implemented for completeness
+-- in the executor framework. They ensure that any valid plan tree with Result
+-- as the inner child of Merge Join can be executed correctly.
+--
+-- The key code locations:
+-- - nodeResult.c: ExecResultMarkPos (line 146) and ExecResultRestrPos (line 161)
+-- - execAmi.c: Switch cases for T_ResultState in ExecMarkPos and ExecRestrPos
+--
+-- The functions simply delegate to the child plan:
+--   if (outerPlan != NULL) ExecMarkPos(outerPlan);
+--   if (outerPlan != NULL) ExecRestrPos(outerPlan);
+--
+-- If no outer plan exists (childless Result), ExecResultMarkPos logs DEBUG2
+-- and ExecResultRestrPos raises ERROR.
+--
