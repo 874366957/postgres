@@ -90,14 +90,17 @@ ORDER BY t1.a, t1.b, t2.y;
 (16 rows)
 
 --
--- Test 2: Merge join where inner side has projection that requires Result
--- A Sort node is NOT projection-capable. If we need a different tlist
--- on top of Sort, the planner creates a Result node.
+-- Test 2: Merge join with additional duplicates
+-- This test adds more duplicates to exercise mark/restore more extensively.
+-- The Merge Join algorithm marks positions when processing duplicate keys
+-- and restores to replay matching rows.
 --
--- We create a scenario using a subquery with UNION that forces specific
--- column handling that cannot be merged into the Sort.
+-- Note: ExecResultMarkPos/ExecResultRestrPos exist for cases where a Result
+-- node wraps a Sort/Material. In practice, the optimizer often optimizes
+-- this away, but the functions ensure the executor can handle any valid
+-- plan tree. This test demonstrates the mark/restore mechanism in general.
 --
--- First show a case that uses merge join with the inner side processed
+-- First show a case that uses merge join with the inner side processing duplicates
 INSERT INTO result_markpos_t1 VALUES (3, 301), (3, 302);
 INSERT INTO result_markpos_t2 VALUES (3, 301, 'extra1'), (3, 302, 'extra2');
 ANALYZE result_markpos_t1;
