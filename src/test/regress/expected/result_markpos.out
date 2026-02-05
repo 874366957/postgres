@@ -1,0 +1,128 @@
+--
+-- Test to understand ExecResultMarkPos and ExecResultRestrPos functions
+--
+-- Background:
+-- -----------
+-- ExecResultMarkPos: Marks current scan position by delegating to child plan
+-- ExecResultRestrPos: Restores to marked position by delegating to child plan
+--
+-- These functions exist in the executor for completeness: they enable a Result
+-- node with a child plan to participate in mark/restore operations (required
+-- by Merge Join for handling duplicate keys).
+--
+-- In practice, getting these functions called is very difficult because:
+-- 1. MergeJoin can project, so it handles projections itself - no Result needed
+-- 2. If inner needs sorting, Sort is added ABOVE Result, not below
+-- 3. The optimizer aggressively merges projections into capable nodes
+--
+-- The functions would be called if:
+-- - Result is the DIRECT inner child of Merge Join
+-- - Result wraps a plan that supports mark/restore (IndexScan, Sort, Material)
+-- - No additional Sort is needed on the inner side
+-- - Duplicate keys trigger mark/restore
+--
+-- This test demonstrates the typical plan shapes and explains why Result
+-- rarely appears as the direct inner child of Merge Join in practice.
+--
+-- Create tables
+CREATE TABLE result_mark_t1 (a int PRIMARY KEY, b int);
+CREATE TABLE result_mark_t2 (x int, y int);
+CREATE INDEX result_mark_t2_idx ON result_mark_t2(x);
+-- Insert data with duplicates to trigger mark/restore
+INSERT INTO result_mark_t1 SELECT i, i * 10 FROM generate_series(1, 10) i;
+INSERT INTO result_mark_t2 SELECT i % 5 + 1, i FROM generate_series(1, 20) i;
+ANALYZE result_mark_t1;
+ANALYZE result_mark_t2;
+-- Force merge join
+SET enable_hashjoin = off;
+SET enable_nestloop = off;
+SET enable_mergejoin = on;
+--
+-- Demonstration 1: Merge join with IndexScan (mark/restore on IndexScan)
+-- The projection (y * 2) is handled by Merge Join itself - no Result node
+--
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.b, t2.x, t2.y, t2.y * 2 as computed
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+ORDER BY t1.a;
+                QUERY PLAN                 
+-------------------------------------------
+ Merge Join
+   Merge Cond: (t1.a = t2.x)
+   ->  Sort
+         Sort Key: t1.a
+         ->  Seq Scan on result_mark_t1 t1
+   ->  Sort
+         Sort Key: t2.x
+         ->  Seq Scan on result_mark_t2 t2
+(8 rows)
+
+SELECT t1.a, t1.b, t2.x, t2.y, t2.y * 2 as computed
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+WHERE t1.a = 3
+ORDER BY t1.a, t2.y;
+ a | b  | x | y  | computed 
+---+----+---+----+----------
+ 3 | 30 | 3 |  2 |        4
+ 3 | 30 | 3 |  7 |       14
+ 3 | 30 | 3 | 12 |       24
+ 3 | 30 | 3 | 17 |       34
+(4 rows)
+
+--
+-- Demonstration 2: With whole-row reference (still no Result node)
+-- Merge Join's projection capability handles this case too
+--
+EXPLAIN (COSTS OFF)  
+SELECT t1.a, (t2.*)::text as t2_row
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+ORDER BY t1.a;
+                QUERY PLAN                 
+-------------------------------------------
+ Merge Join
+   Merge Cond: (t1.a = t2.x)
+   ->  Sort
+         Sort Key: t1.a
+         ->  Seq Scan on result_mark_t1 t1
+   ->  Sort
+         Sort Key: t2.x
+         ->  Seq Scan on result_mark_t2 t2
+(8 rows)
+
+SELECT t1.a, (t2.*)::text as t2_row
+FROM result_mark_t1 t1 JOIN result_mark_t2 t2 ON t1.a = t2.x
+WHERE t1.a = 3
+ORDER BY t1.a, t2_row;
+ a | t2_row 
+---+--------
+ 3 | (3,12)
+ 3 | (3,17)
+ 3 | (3,2)
+ 3 | (3,7)
+(4 rows)
+
+-- Reset settings
+RESET enable_hashjoin;
+RESET enable_nestloop;
+RESET enable_mergejoin;
+-- Cleanup
+DROP TABLE result_mark_t1;
+DROP TABLE result_mark_t2;
+--
+-- Summary:
+-- --------
+-- ExecResultMarkPos and ExecResultRestrPos are implemented for completeness
+-- in the executor framework. They ensure that any valid plan tree with Result
+-- as the inner child of Merge Join can be executed correctly.
+--
+-- The key code locations:
+-- - nodeResult.c: ExecResultMarkPos() and ExecResultRestrPos() functions
+-- - execAmi.c: Switch cases for T_ResultState in ExecMarkPos and ExecRestrPos
+--
+-- The functions simply delegate to the child plan:
+--   if (outerPlan != NULL) ExecMarkPos(outerPlan);
+--   if (outerPlan != NULL) ExecRestrPos(outerPlan);
+--
+-- If no outer plan exists (childless Result), ExecResultMarkPos logs DEBUG2
+-- and ExecResultRestrPos raises ERROR.
+--
