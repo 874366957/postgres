@@ -89,7 +89,7 @@ DROP TABLE result_mark_t2;
 -- as the inner child of Merge Join can be executed correctly.
 --
 -- The key code locations:
--- - nodeResult.c: ExecResultMarkPos (line 146) and ExecResultRestrPos (line 161)
+-- - nodeResult.c: ExecResultMarkPos() and ExecResultRestrPos() functions
 -- - execAmi.c: Switch cases for T_ResultState in ExecMarkPos and ExecRestrPos
 --
 -- The functions simply delegate to the child plan:
