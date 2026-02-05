@@ -1,0 +1,27 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_upsert s2_upsert show
+step s1_upsert: INSERT INTO conflict_demo(id, value) VALUES(1, 'session1') ON CONFLICT (id) DO UPDATE SET value = conflict_demo.value || '+s1';
+step s2_upsert: INSERT INTO conflict_demo(id, value) VALUES(1, 'session2') ON CONFLICT (id) DO UPDATE SET value = conflict_demo.value || '+s2';
+step show: SELECT * FROM conflict_demo;
+id|value       
+--+------------
+ 1|session2+s1
+(1 row)
+
+
+starting permutation: s1_upsert show s2_upsert show
+step s1_upsert: INSERT INTO conflict_demo(id, value) VALUES(1, 'session1') ON CONFLICT (id) DO UPDATE SET value = conflict_demo.value || '+s1';
+step show: SELECT * FROM conflict_demo;
+id|value   
+--+--------
+ 1|session1
+(1 row)
+
+step s2_upsert: INSERT INTO conflict_demo(id, value) VALUES(1, 'session2') ON CONFLICT (id) DO UPDATE SET value = conflict_demo.value || '+s2';
+step show: SELECT * FROM conflict_demo;
+id|value       
+--+------------
+ 1|session1+s2
+(1 row)
+
